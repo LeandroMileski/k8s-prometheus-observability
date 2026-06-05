@@ -9,3 +9,6 @@ spec:
   ports:
     - port: 80 # externally
       targetPort: 8080 # on the container
+    - name: metrics
+      port: 8081
+      targetPort: 8081
