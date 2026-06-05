@@ -1,0 +1,15 @@
+*.tfstate , *.tfvars , hosts.ini , vault.yml, .terraform*, Ansible-Java-MySQL-Helm-Kubernetes
+
+# Ignore the local Terraform cache directory
+**/terraform/.terraform/
+
+# Ignore local state and backup files
+**/terraform/*.tfstate
+**/terraform/*.tfstate.backup
+**/terraform/*.tfstate.lock.info
+**/terraform/*.lock.hcl
+
+
+# Ignore local variable configuration files
+**/terraform/*.tfvars
+**/terraform/*.tfvars.json
