@@ -4,7 +4,7 @@ metadata:
   name: java-deployment
   namespace: java-mysql
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
       app: java-app
