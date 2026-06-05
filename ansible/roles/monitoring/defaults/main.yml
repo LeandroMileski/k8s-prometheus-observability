@@ -1,0 +1,3 @@
+# ansible/roles/monitoring/defaults/main.yml
+monitoring_namespace: monitoring
+prometheus_release_name: kube-prometheus-stack

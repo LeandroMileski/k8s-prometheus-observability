@@ -32,6 +32,12 @@
           nodePorts:
             http: "{{ ingress_http_nodeport }}"
             https: "{{ ingress_https_nodeport }}"
+        metrics:
+          enabled: true
+          serviceMonitor:
+            enabled: true
+            additionalLabels:
+              release: kube-prometheus-stack
             
 - name: Wait for ingress controller to be ready
   ansible.builtin.command: >

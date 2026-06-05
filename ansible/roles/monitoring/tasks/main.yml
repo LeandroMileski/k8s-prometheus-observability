@@ -1,0 +1,48 @@
+# ansible/roles/monitoring/tasks/main.yml
+---
+- name: Install pip3
+  ansible.builtin.apt:
+    name:
+      - python3-pip
+    state: present
+    update_cache: true
+  become: true
+
+- name: Install kubernetes Python library
+  ansible.builtin.pip:
+    name: kubernetes
+    state: present
+    extra_args: "--break-system-packages --no-deps"
+  become: true
+
+- name: Create monitoring namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ monitoring_namespace }}"
+
+- name: Add prometheus-community Helm repository
+  kubernetes.core.helm_repository:
+    name: prometheus-community
+    repo_url: "https://prometheus-community.github.io/helm-charts"
+    kubeconfig: "{{ kubeconfig }}"
+
+- name: Deploy kube-prometheus-stack
+  kubernetes.core.helm:
+    name: "{{ prometheus_release_name }}"
+    chart_ref: prometheus-community/kube-prometheus-stack
+    release_namespace: "{{ monitoring_namespace }}"
+    kubeconfig: "{{ kubeconfig }}"
+    create_namespace: false
+    wait: true
+    values:
+      grafana:
+        service:
+          type: NodePort
+      prometheus:
+        service:
+          type: NodePort

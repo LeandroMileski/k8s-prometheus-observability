@@ -1,0 +1,7 @@
+# playbooks/04-monitoring.yml
+---
+- name: Deploy Prometheus
+  hosts: control_plane
+  become: true
+  roles:
+    - monitoring
