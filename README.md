@@ -1,121 +1,181 @@
-# Build Guide — k8s-prometheus-observability
+# k8s-prometheus-observability
 
-Add Prometheus monitoring to the Java + MySQL + Ingress stack you built in the
-Ansible exercises. Goal: know the moment MySQL, the Ingress, or the app breaks —
-and pinpoint *what* broke in seconds instead of hours.
+Know about problems before your customers do.
 
-Built milestone by milestone; each ends in a verifiable state. Reuses the
-Terraform + Ansible from your `Ansible-Java-MySQL-Helm-Kubernetes` repo.
-
-Legend: 🎯 goal · ✅ definition of done · 🧠 what to understand
+This project adds a full Prometheus observability stack on top of a Kubernetes-hosted Java + MySQL + Nginx Ingress application. Instead of reacting to customer complaints, you get alerted the moment something breaks — before anyone notices.
 
 ---
 
-## Milestone 0 — New repo & project bootstrap
-🎯 Repo created with the adapted app-stack automation in place.
+## What this project does
 
-- [ ] Create the `k8s-prometheus-observability` repo on GitHub
-- [ ] Copy in the adapted `terraform/` and `ansible/` from the Ansible repo
-- [ ] `ansible-galaxy collection install -r ansible/requirements.yml`
-- [ ] README skeleton + `.gitignore` (tfstate, tfvars, hosts.ini, vault.yml)
-
-✅ Repo clones cleanly; `terraform validate` and `ansible --version` both pass.
-🧠 You're reusing proven infra automation — observability is a layer on top, not a rebuild.
+- Scrapes metrics from three targets: Nginx Ingress Controller, MySQL, and a Spring Boot Java app
+- Evaluates alert rules for high error rates, database issues, and replica mismatches
+- Routes alerts to email via Alertmanager when conditions are met
+- Visualises the full stack health in a custom Grafana dashboard
 
 ---
 
-## Milestone 1 — Deploy the base application stack (Exercise 1)
-🎯 The full app running: cluster, replicated MySQL, Java, Ingress.
+## Architecture
 
-- [ ] 1.1 Provision the cluster (Terraform + bootstrap playbook, incl. local-path storage)
-- [ ] 1.2 MySQL via Helm — `architecture: replication`, **`secondary.replicaCount: 1`** (1 primary + 1 secondary = **2 replicas**)
-- [ ] 1.3 Java app — **`replicas: 3`**, `DB_HOST` → `mysql-primary`
-- [ ] 1.4 Nginx Ingress Controller via Helm
-- [ ] 1.5 Ingress rule routing to the Java service
-
-✅ App loads in a browser; `kubectl get pods` shows 2 MySQL + 3 Java pods Running.
-🧠 This is your exercise 7 & 8 work with two tweaks (MySQL 2 instead of 3, Java 3). Reuse, don't rewrite.
-
----
-
-## Milestone 2 — Deploy Prometheus (kube-prometheus-stack)
-🎯 The Prometheus Operator stack running, UI reachable.
-
-- [ ] 2.1 Add the `prometheus-community` Helm repo
-- [ ] 2.2 New Ansible role (`monitoring`) that helm-installs `kube-prometheus-stack` into a `monitoring` namespace
-- [ ] 2.3 Verify pods: Prometheus, Alertmanager, Grafana, kube-state-metrics, node-exporter, operator
-- [ ] 2.4 Reach the Prometheus UI (port-forward or a NodePort)
-
-✅ Prometheus UI loads; Status → Targets shows the default Kubernetes targets already UP.
-🧠 The big concept: the **Operator pattern**. You don't edit a `prometheus.yml`. Prometheus is configured by **Custom Resources** — `ServiceMonitor`, `PodMonitor`, `PrometheusRule`. The operator watches those CRDs and rewrites Prometheus's config automatically. Every milestone below is "create the right ServiceMonitor."
-
----
-
-## Milestone 3 — Scrape the Nginx Ingress Controller
-🎯 Ingress metrics flowing into Prometheus.
-
-- [ ] 3.1 Recognise: ingress-nginx exposes metrics **natively** — no separate exporter needed
-- [ ] 3.2 Update the ingress-nginx Helm values: `controller.metrics.enabled: true` and `controller.metrics.serviceMonitor.enabled: true`
-- [ ] 3.3 Set `controller.metrics.serviceMonitor.additionalLabels.release` to your kube-prometheus-stack release name (so the operator selects it)
-- [ ] 3.4 Confirm the `ingress-nginx` target is UP in Prometheus
-
-✅ Status → Targets shows the nginx controller UP; `nginx_ingress_controller_requests` returns data.
-🧠 First of three scraping patterns: **native metrics**. The app already speaks Prometheus; you just turn it on and point a ServiceMonitor at it.
+```
+                        ┌─────────────────────────────────────┐
+                        │           Kubernetes Cluster         │
+                        │                                      │
+  Browser ──► Nginx Ingress Controller ──► Java App (x3)      │
+                   │                            │              │
+                   │                        MySQL HA           │
+                   │                      (primary + 2x secondary)
+                   │                                           │
+                   │         ┌────────────────────────────┐   │
+                   │         │     monitoring namespace    │   │
+                   └────────►│  Prometheus Operator Stack  │   │
+                             │  - Prometheus               │   │
+                             │  - Alertmanager             │   │
+                             │  - Grafana                  │   │
+                             │  - kube-state-metrics       │   │
+                             │  - node-exporter            │   │
+                             └────────────┬───────────────┘   │
+                                          │                    │
+                        └─────────────────│────────────────────┘
+                                          │
+                                          ▼
+                                    Email (SendGrid)
+```
 
 ---
 
-## Milestone 4 — Scrape MySQL
-🎯 MySQL metrics flowing in.
+## The three scraping patterns
 
-- [ ] 4.1 Recognise: MySQL does **not** speak Prometheus — it needs an **exporter** (`mysqld-exporter`)
-- [ ] 4.2 The Bitnami chart bundles it: set `metrics.enabled: true` and `metrics.serviceMonitor.enabled: true`
-- [ ] 4.3 Set the serviceMonitor `labels.release` to match your stack
-- [ ] 4.4 Confirm the `mysql` target is UP
+Every scraping task is the same shape: make metrics reachable, then create a ServiceMonitor the Operator will select. The variable is whether the app speaks Prometheus natively or needs an exporter.
 
-✅ Status → Targets shows MySQL UP; `mysql_up` returns 1.
-🧠 Second pattern: **sidecar exporter**. A separate process translates MySQL's internal stats into Prometheus format. The chart deploys it for you — that's the note in the exercise about checking the chart before adding your own exporter.
+### 1. Native metrics — Nginx Ingress Controller
+
+ingress-nginx exposes a Prometheus endpoint natively. Enable it via Helm values and point a ServiceMonitor at it — no extra processes needed.
+
+```yaml
+controller:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+```
+
+### 2. Sidecar exporter — MySQL
+
+MySQL has no built-in Prometheus endpoint. The Bitnami chart bundles `mysqld-exporter` which connects to MySQL, queries its internal stats, and exposes them in Prometheus format. Enable it via Helm values.
+
+```yaml
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+```
+
+### 3. Native on custom port/path — Java app (Spring Boot)
+
+The Java app exposes metrics natively via Micrometer + Actuator, but on a non-standard port (8081) and path (/actuator/prometheus). The Service must expose port 8081 and the ServiceMonitor must specify both explicitly — defaults won't find it.
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: java-app
+  labels:
+    release: kube-prometheus-stack
+spec:
+  endpoints:
+    - port: metrics
+      path: /actuator/prometheus
+```
+
+**The #1 gotcha:** the `release` label must match your kube-prometheus-stack release name exactly. A wrong or missing label means the Operator silently ignores the ServiceMonitor — the target never appears, no error, no warning.
 
 ---
 
-## Milestone 5 — Scrape the Java application
-🎯 App metrics flowing in — the trickiest of the three.
+## Alert rules
 
-- [ ] 5.1 Recognise: the Java app exposes metrics **natively but on a non-standard port (8081), not `/metrics`**
-- [ ] 5.2 Expose port 8081 on the Java `Service` (add a named `metrics` port)
-- [ ] 5.3 Find the actual metrics path the app serves (e.g. `/actuator/prometheus` for Spring Boot)
-- [ ] 5.4 Write a `ServiceMonitor` targeting the `metrics` port + that path, labelled for the operator
-- [ ] 5.5 Confirm the `java-app` target is UP
+| Alert | Condition | Severity |
+|---|---|---|
+| NginxHighErrorRate | >5% of requests returning 4xx | warning |
+| MySQLDown | mysql_up == 0 | critical |
+| MySQLTooManyConnections | connections > 100 | warning |
+| JavaTooManyRequests | request rate > 10 req/s | warning |
+| StatefulSetReplicasMismatch | ready replicas != desired replicas | critical |
 
-✅ Status → Targets shows the Java app UP; a JVM metric (e.g. `jvm_memory_used_bytes`) returns data.
-🧠 Third pattern: **native metrics on a custom port/path**. No exporter, but you must hand-write the ServiceMonitor with the exact port and path — the defaults won't find it. This is why the exercise calls out 8081 specifically.
-
----
-
-## Milestone 6 — Verify everything in the Prometheus UI
-🎯 All three custom targets confirmed UP.
-
-- [ ] 6.1 Status → Targets — nginx, mysql, java all UP, no scrape errors
-- [ ] 6.2 Run one PromQL query per service and get data back
-- [ ] 6.3 (Optional) open Grafana, log in, browse the bundled dashboards
-
-✅ Three custom targets UP alongside the defaults; queries return live data.
-🧠 "Target UP" means Prometheus successfully scraped it on the last cycle. A target DOWN here is exactly the kind of early signal that, in the scenario, would've told you about the outage before a user emailed you.
+Alerts route to email via Alertmanager → SendGrid.
 
 ---
 
-## Milestone 7 — Polish, portfolio & proactive alerting
-🎯 Documented, reproducible, and actually proactive.
+## Stack
 
-- [ ] 7.1 README: architecture, the three scraping patterns, run + teardown
-- [ ] 7.2 Confirm full reproducibility: destroy → apply → site.yml → all targets UP
-- [ ] 7.3 STAR-method interview summary
-- [ ] 7.4 **Stretch — alerting** (the real goal of the scenario): `PrometheusRule` resources for "MySQL down", "Ingress 5xx rate high", "Java app target down", wired to Alertmanager
-- [ ] 7.5 Stretch — a custom Grafana dashboard for the app
-
-✅ A stranger could clone, run, and see monitoring working from the README.
-🧠 Scraping metrics is *visibility*; alerting rules are what make it *proactive* — closing the loop on "know about issues before users do."
+| Component | Technology |
+|---|---|
+| Infra provisioning | Terraform (Linode) |
+| Configuration management | Ansible |
+| Kubernetes | kubeadm, v1.32 |
+| Monitoring | kube-prometheus-stack (Prometheus Operator) |
+| Ingress | Nginx Ingress Controller |
+| Database | MySQL via Bitnami Helm chart (HA replication) |
+| App | Spring Boot (Java 21) |
+| Alerting | Alertmanager → SendGrid → Email |
 
 ---
 
-### The one idea that ties it together
-Every scraping task is the same shape: **make the metrics reachable, then create a ServiceMonitor the operator will select.** The only variable is whether the app speaks Prometheus natively (nginx, java) or needs an exporter (mysql) — and the label that lets the operator find your ServiceMonitor. Get the label wrong and the target silently never appears; that's the #1 gotcha.
+## Run
+
+### Prerequisites
+
+- Terraform installed
+- Ansible installed with `kubernetes.core` collection
+- `gh` CLI authenticated
+- Linode API token
+- Ansible Vault password file at `~/.vault_pass`
+
+### Deploy
+
+```bash
+# 1. Provision infrastructure
+cd terraform/
+terraform init && terraform apply
+
+# 2. Deploy the full stack
+cd ../ansible/
+ansible-playbook playbooks/01-bootstrap.yml
+ansible-playbook playbooks/02-app-stack.yml
+ansible-playbook playbooks/03-ingress.yml
+ansible-playbook playbooks/04-monitoring.yml
+```
+
+### Verify
+
+```bash
+# All targets UP
+kubectl get pods -n monitoring
+kubectl get servicemonitor -A
+
+# Access UIs
+# Prometheus: http://<node-ip>:<prometheus-nodeport>
+# Grafana:    http://<node-ip>:<grafana-nodeport>  (admin / prom-operator)
+# Alertmanager: http://<node-ip>:<alertmanager-nodeport>
+```
+
+### Teardown
+
+```bash
+cd terraform/
+terraform destroy
+```
+
+---
+
+## Lessons learned
+
+**The Operator pattern changes how you think about config.** You never edit a `prometheus.yml`. Instead you create Kubernetes resources — ServiceMonitor, PrometheusRule — and the Operator rewrites Prometheus config automatically. The mental shift from "edit a file" to "create a CRD" is the core concept.
+
+**Scraping metrics is visibility. Alert rules make it proactive.** A target showing UP in Prometheus means you can see what's happening. A PrometheusRule firing before a user complains is the actual goal.
+
+**Real troubleshooting happens at the network layer.** Linode's firewall was rejecting intra-cluster connections, causing the Nginx admission webhook to fail on deployment. Debugging this required tracing from pod events → webhook calls → firewall rules — a reminder that Kubernetes problems are often infrastructure problems in disguise.
