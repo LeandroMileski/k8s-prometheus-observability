@@ -87,6 +87,15 @@ resource "linode_firewall" "k8s" {
     ipv4     = local.node_cidrs
   }
 
+  outbound { #This allows SMTP traffic
+    label    = "allow-smtp-out"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "587"
+    ipv4     = ["0.0.0.0/0"]
+  }
+
+
   linodes = concat(
     [linode_instance.control_plane.id],
     linode_instance.worker[*].id,
