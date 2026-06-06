@@ -1,0 +1,31 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: java-alerts
+  namespace: java-mysql
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: java
+      rules:
+        - alert: JavaTooManyRequests
+          expr: >
+            sum(rate(nginx_ingress_controller_requests{service="java-service"}[5m])) > 10
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Java app receiving too many requests"
+            description: "Request rate is {{ $value }} req/s, exceeding the threshold of 10 req/s."
+
+        - alert: StatefulSetReplicasMismatch
+          expr: >
+            kube_statefulset_status_replicas_ready
+            != kube_statefulset_status_replicas
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "StatefulSet replicas mismatch"
+            description: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} has {{ $value }} ready replicas, expected {{ $labels.replicas }}."

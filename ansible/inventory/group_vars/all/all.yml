@@ -13,3 +13,7 @@ app_host: "java.{{ hostvars[groups['workers'][0]].ansible_host }}.nip.io"
 
 db_name: "team_app"
 
+gmail_app_password: "{{ vault_gmail_app_password }}"
+
+
+

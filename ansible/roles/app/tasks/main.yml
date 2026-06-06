@@ -40,7 +40,7 @@
   changed_when: "'unchanged' not in apply_secret.stdout"
   no_log: true
 
-- name: Apply Java app and service
+- name: Apply Java app, service, and service monitor
   ansible.builtin.command: >
     kubectl --kubeconfig {{ kubeconfig }}
     apply -f {{ k8s_remote_dir }}/{{ item }}
@@ -50,6 +50,17 @@
     - java-servicemonitor.yaml
   register: apply_java
   changed_when: "'unchanged' not in apply_java.stdout"
+
+- name: Apply alerts
+  ansible.builtin.command: >
+    kubectl --kubeconfig {{ kubeconfig }}
+    apply -f {{ k8s_remote_dir }}/alerts/{{ item }}
+  loop:
+    - nginx-alerts.yaml
+    - mysql-alerts.yaml
+    - java-app-alerts.yaml
+  register: apply_alerts
+  changed_when: "'unchanged' not in apply_alerts.stdout"
 
 - name: Render ingress from template
   ansible.builtin.template:

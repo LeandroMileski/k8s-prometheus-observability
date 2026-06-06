@@ -1,0 +1,28 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mysql-alerts
+  namespace: java-mysql
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: mysql
+      rules:
+        - alert: MySQLDown
+          expr: mysql_up == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "MySQL instance is down"
+            description: "MySQL instance {{ $labels.instance }} has been down for more than 1 minute."
+
+        - alert: MySQLTooManyConnections
+          expr: mysql_global_status_connections > 100
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "MySQL has too many connections"
+            description: "MySQL instance {{ $labels.instance }} has {{ $value }} connections."
