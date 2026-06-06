@@ -1,0 +1,14 @@
+# ansible/group_vars/all/vault.yml.example
+# Copy this to vault.yml and fill in your values, then encrypt with:
+#   ansible-vault encrypt ansible/group_vars/all/vault.yml
+
+# Database credentials
+db_user: "appuser"
+db_password: "your-db-password"
+db_root_password: "your-db-root-password"
+
+
+# SendGrid API Key
+# Generate at: app.sendgrid.com -> Settings -> API Keys -> Mail Send permission
+# Also verify your sender email at: Settings -> Sender Authentication
+vault_sendgrid_api_key: "your-sendgrid-api-key"
