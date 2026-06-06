@@ -125,45 +125,116 @@ Alerts route to email via Alertmanager → SendGrid.
 
 ---
 
-## Run
-
-### Prerequisites
+## Prerequisites
 
 - Terraform installed
-- Ansible installed with `kubernetes.core` collection
+- Ansible installed with `kubernetes.core` collection:
+  ```bash
+  ansible-galaxy collection install -r ansible/requirements.yml
+  ```
 - `gh` CLI authenticated
 - Linode API token
+- SendGrid account with a verified Sender Identity
 - Ansible Vault password file at `~/.vault_pass`
 
-### Deploy
+---
+
+## Setup
+
+### 1. Terraform variables
+
+Copy the example and fill in your values:
+
+```bash
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+```
+
+```hcl
+# terraform/terraform.tfvars
+ssh_pubkey   = "ssh-rsa ..."
+region       = "us-ord"
+worker_count = 1
+linode_token = "your-linode-token"
+```
+
+### 2. Ansible Vault
+
+Create the vault file:
+
+```bash
+ansible-vault create ansible/group_vars/all/vault.yml
+```
+
+Populate it using this structure (see `vault.yml.example` for reference):
+
+```yaml
+# Database credentials
+db_user: "appuser"
+db_password: "your-db-password"
+db_root_password: "your-db-root-password"
+
+# SendGrid API Key — used by Alertmanager to send alert emails
+vault_sendgrid_api_key: "your-sendgrid-api-key"
+```
+
+> **SendGrid setup:** create a free account at sendgrid.com, generate an API key with "Mail Send" permission, and verify your sender email address under Settings → Sender Authentication.
+
+Save your vault password to `~/.vault_pass` and restrict permissions:
+
+```bash
+echo "your-vault-password" > ~/.vault_pass
+chmod 600 ~/.vault_pass
+```
+
+---
+
+## Deploy
 
 ```bash
 # 1. Provision infrastructure
 cd terraform/
 terraform init && terraform apply
 
-# 2. Deploy the full stack
+# 2. Deploy the full stack (all playbooks in order)
 cd ../ansible/
-ansible-playbook playbooks/01-bootstrap.yml
-ansible-playbook playbooks/02-app-stack.yml
-ansible-playbook playbooks/03-ingress.yml
-ansible-playbook playbooks/04-monitoring.yml
+ansible-playbook playbooks/site.yml
 ```
 
-### Verify
+`site.yml` runs all five playbooks in order:
+1. `00-bootstrap-cluster.yml` — kubeadm cluster + storage
+2. `01-ingress.yml` — Nginx Ingress Controller
+3. `02-mysql-ha.yml` — replicated MySQL
+4. `03-deploy-app.yml` — Java application
+5. `04-monitoring.yml` — Prometheus Operator stack + alerting
+
+---
+
+## Verify
 
 ```bash
-# All targets UP
-kubectl get pods -n monitoring
+# Check all pods Running
+kubectl get pods -A
+
+# Check all three custom targets have ServiceMonitors
 kubectl get servicemonitor -A
 
-# Access UIs
-# Prometheus: http://<node-ip>:<prometheus-nodeport>
-# Grafana:    http://<node-ip>:<grafana-nodeport>  (admin / prom-operator)
-# Alertmanager: http://<node-ip>:<alertmanager-nodeport>
+# Check alert rules loaded
+kubectl get prometheusrule -A
 ```
 
-### Teardown
+Access the UIs (get NodePorts with `kubectl get svc -A`):
+
+| UI | Default NodePort |
+|---|---|
+| Prometheus | 30090 |
+| Grafana | 30148 (admin / prom-operator) |
+| Alertmanager | 30903 |
+
+Import `grafana/k8s-observability-dashboard.json` into Grafana to load the custom dashboard.
+
+---
+
+## Teardown
 
 ```bash
 cd terraform/
