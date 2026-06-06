@@ -155,6 +155,7 @@ ssh_pubkey   = "ssh-rsa ..."
 region       = "us-ord"
 worker_count = 1
 linode_token = "your-linode-token"
+root_pass_comp = "password-complement"
 ```
 
 ### 2. Ansible Vault
@@ -190,22 +191,26 @@ chmod 600 ~/.vault_pass
 
 ## Deploy
 
-```bash
-# 1. Provision infrastructure
-cd terraform/
-terraform init && terraform apply
+A single script provisions the infrastructure, waits for all VMs to accept SSH, and runs the full Ansible stack:
 
-# 2. Deploy the full stack (all playbooks in order)
-cd ../ansible/
-ansible-playbook playbooks/site.yml
+```bash
+./deploy.sh
 ```
 
-`site.yml` runs all five playbooks in order:
+The script handles everything in order:
+1. `terraform apply` — provisions Linode VMs, firewall, and generates the Ansible inventory
+2. Waits for all nodes to accept SSH connections before proceeding
+3. `ansible-playbook playbooks/site.yml` — deploys the full stack
+
+`site.yml` runs the playbooks in this order:
+
 1. `00-bootstrap-cluster.yml` — kubeadm cluster + storage
-2. `01-ingress.yml` — Nginx Ingress Controller
-3. `02-mysql-ha.yml` — replicated MySQL
-4. `03-deploy-app.yml` — Java application
-5. `04-monitoring.yml` — Prometheus Operator stack + alerting
+2. `04-monitoring.yml` — Prometheus Operator stack + CRDs (must come before ingress and MySQL so ServiceMonitor CRDs exist)
+3. `01-ingress.yml` — Nginx Ingress Controller + ServiceMonitor
+4. `02-mysql-ha.yml` — replicated MySQL + ServiceMonitor
+5. `03-deploy-app.yml` — Java application + Ingress rule
+
+> **Why monitoring deploys before the app stack?** The Prometheus Operator installs the `ServiceMonitor` and `PrometheusRule` CRDs. Ingress and MySQL both create ServiceMonitors during their Helm install — if the CRDs don't exist yet, those installs fail.
 
 ---
 
@@ -237,8 +242,7 @@ Import `grafana/k8s-observability-dashboard.json` into Grafana to load the custo
 ## Teardown
 
 ```bash
-cd terraform/
-terraform destroy
+./destroy.sh
 ```
 
 ---

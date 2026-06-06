@@ -9,7 +9,7 @@ data "http" "my_ip" {
 locals {
   # A random-ish root password is required by the API but we never use it:
   # access is via SSH key only. Rotate/ignore it.
-  root_pass = "12312323-${var.label_prefix}-9f3a!"
+  root_pass = "12312323-${var.root_pass_comp}-9f3a!"
 
   node_cidrs = [
     for ip in concat(
