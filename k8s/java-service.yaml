@@ -3,11 +3,14 @@ kind: Service
 metadata:
   name: java-service
   namespace: java-mysql
+  labels:
+    app: java-app
 spec:  
   selector:
       app: java-app
   ports:
-    - port: 80 # externally
+    - name: http
+      port: 80 # externally
       targetPort: 8080 # on the container
     - name: metrics
       port: 8081
